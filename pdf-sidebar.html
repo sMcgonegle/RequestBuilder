@@ -1,0 +1,610 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/2.2.4/jquery.min.js"></script>
+    <script src="https://unpkg.com/jspdf@latest/dist/jspdf.min.js"></script>
+    <script src="//mozilla.github.io/pdf.js/build/pdf.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/0.4.1/html2canvas.js"></script>
+    <style>
+        #side-container{
+            overflow-x: hidden; /* Disable horizontal scroll */
+            width: 100%;
+        }
+
+        .section{
+            background-color: #eee;
+            color: #444;
+            margin-top: 5px;
+            width: 100%;
+            outline: none;
+
+            z-index: 0;
+        }
+
+        .section-button{
+            cursor: pointer;
+            display: block;
+            text-align: center;
+            font-weight: bold;
+            font-size: 20px;
+            background-color: #eeeeee;
+            width: 100%;
+            height: 35px;
+        }
+
+        .section-button:hover{
+            background-color: #D3D3D3;
+        }
+
+        .section-delete {
+            float:right;
+            color: white;
+            text-align: center;
+            font-weight: bold;
+            background-color: crimson;
+        }
+
+        .section-checkbox {
+            width:20px;
+            height:20px;
+            float:left;
+            background:white;
+            border-radius:5px;
+            border:2px solid #555;
+        }
+
+        .section-checkbox:checked {
+            background-color: #2196F3;
+        }
+
+        .checkmark {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 25px;
+            width: 25px;
+            background-color: #eee;
+        }
+
+        .checkmark:after {
+            content: "";
+            position: absolute;
+            display: none;
+        }
+
+        .section-panel{
+            background-color: #eee;
+            width: 100%;
+            text-align: center;
+            font-weight: bold;
+            font-size: 18px;
+        }
+
+        .img-div{
+            width: 90%;
+            margin: auto;
+            padding: 10px;
+        }
+
+        .panel-image{
+            width: 100%;
+            overflow: hidden;
+            outline: 3px solid #444444;
+
+            background-color: #444444;
+            z-index: 1;
+        }
+
+        .image-checkbox {
+            position: absolute;
+            width:20px;
+            height:20px;
+            left: 20px;
+        }
+
+        .image-delete {
+            position: absolute;
+            right:20px;
+            text-align: center;
+            color: white;
+            font-weight: bold;
+            background-color: crimson;
+        }
+
+    </style>
+</head>
+<body>
+<div id="Main">
+    <div id="side-container">
+    </div>
+    <div id="pdf-wrapper"></div>
+</div>
+
+<canvas id="sidebar-canvas" style = "overflow-x: hidden" width="270" height = "500"></canvas>
+
+<script>
+    var sections = [], imageList = [], canClick = true, currentSection,
+        formNum, formName = "", formAddress = "", formDate = "";
+
+    window.onmessage = (event) => {
+        let received = event.data.split(" ");
+        if (received[0] === "Draw") {
+        }
+        if(received[0] === "Name")
+            for(let i = 1; i < received.length; i++)
+                formName = formName + " " + received[i];
+        if(received[0] === "Address")
+            for(let i = 1; i < received.length; i++)
+                formAddress = formAddress + " " + received[i];
+        if(received[0] === "Date")
+            for(let i = 1; i < received.length; i++)
+                formDate = formDate + " " + received[i];
+
+        if(received[0] === "Create")
+        {
+            if(received[1] === "Image")
+                addImage(received[2]);
+            if(received[1] === "Section")
+                addSection();
+            if(received[1] === "PDF")
+            {
+                formNum = received[2];
+                createPDF();
+            }
+        }
+    };
+
+    function addSection(){
+        let newSection = document.createElement("div");
+        newSection.className = "section";
+        newSection.name = "Section " + (sections.length);
+
+        let sectionButton = document.createElement("button");
+        sectionButton.type = "button";
+        sectionButton.innerHTML = "Section " + (sections.length+1);
+        sectionButton.className = "section-button";
+
+        let checkbox = document.createElement("input");
+        checkbox.className = "section-checkbox";
+        checkbox.type = "checkbox";
+        checkbox.name = "check";
+        checkbox.value = "value";
+        checkbox.checked = true;
+
+        let deleteButton = document.createElement("button");
+        deleteButton.type = "button";
+        deleteButton.innerHTML = "X ";
+        deleteButton.className = "section-delete";
+
+        deleteButton.addEventListener("click", function () {
+            if(canClick)
+            {
+                newSection.remove();
+                sections.splice([newSection.name.split(" ")[1]], 1);
+                for(let i = 0; i < sections.length; i++)
+                {
+                    sections[i].name = "Section " + i;
+                    //sections[i].children[0].innerHTML = "Section " + (sections.length);
+                }
+            }
+            else
+                canClick = true;
+        });
+
+        let newPanel = document.createElement("div");
+        newPanel.className = "section-panel";
+        newPanel.style.display = "none";
+        newPanel.innerHTML = "Drag across the PDF to capture an image here";
+
+        newSection.append(sectionButton);
+        sectionButton.append(checkbox);
+        sectionButton.append(deleteButton);
+        newSection.append(newPanel);
+
+        sectionButton.addEventListener("click", function () {
+            if(canClick) {
+                toggleSection(newSection);
+            }
+            else
+                canClick = true;
+        });
+
+        toggleSection(newSection);
+        sections.push(newSection);
+        $("#side-container").append(newSection);
+    }
+
+    function toggleSection(section) {
+        let topSection = section.children[0];
+
+        if(section.children[1].style.display === "block")
+        {
+            topSection.children[0].checked = false;
+            topSection.style.backgroundColor = "#eeeeee";
+            section.children[1].style.display = "none";
+        }
+        else
+        {
+            if(currentSection !== section && sections.length > 0)
+            {
+                let currentTop = currentSection.children[0];
+                currentTop.classList.toggle("active");
+                currentTop.children[0].checked = false;
+                currentTop.style.backgroundColor = "#eeeeee";
+                currentSection.children[1].style.display = "none";
+            }
+
+            currentSection = section;
+            topSection.children[0].checked = true;
+            topSection.style.backgroundColor = "#D3D3D3";
+            section.children[1].style.display = "block"
+        }
+    }
+
+    function openSection(section) {
+        let content = section.children;
+        for (let i = 1; i < content.length; i++)
+            content[i].style.display = "block";
+    }
+
+    function closeSection(section) {
+        let content = section.children;
+        for (let i = 1; i < content.length; i++)
+            content[i].style.display = "none";
+    }
+
+    function addImage(url) {
+
+        if(sections.length <= 0)
+            addSection();
+
+        let panel = currentSection.children[1];
+
+        if(panel.innerHTML === "Drag across the PDF to capture an image here")
+            panel.innerHTML = "";
+
+        let imgDiv = document.createElement("div");
+        imgDiv.className = "img-div";
+        imgDiv.name = currentSection.name.split(" ")[1] + " " + (panel.children.length);
+
+        imgDiv.style.display = "block";
+
+        let newImg = document.createElement("img");
+        newImg.src = url;
+        newImg.draggable = true;
+        newImg.className = 'panel-image';
+
+        let deleteButton = document.createElement("button");
+        deleteButton.type = "button";
+        deleteButton.innerHTML = "X ";
+        deleteButton.className = "image-delete";
+
+        let checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.style.display = "none";
+        checkbox.className = "image-checkbox";
+        checkbox.name = "check";
+        checkbox.value = "value";
+
+        newImg.addEventListener("click", function () {
+            if(checkbox.style.display === "none")
+            {
+                newImg.style.opacity = ".5";
+                checkbox.style.display = "block";
+                checkbox.checked = true;
+            }
+            else
+            {
+                newImg.style.opacity = "1";
+                checkbox.style.display = "none";
+                checkbox.checked = false;
+            }
+
+            canClick = false;
+        });
+        checkbox.addEventListener("click", function () {
+            checkbox.style.display = "none";
+            checkbox.checked = false;
+
+            canClick = false;
+        });
+        deleteButton.addEventListener("click", function () {
+            imgDiv.name = "-1 " + imgDiv.name.split(" ")[1];
+            imgDiv.remove();
+            if(panel.children.length === 0)
+                panel.innerHTML = "Drag across the PDF to capture an image here";
+            canClick = false;
+        });
+
+        imgDiv.append(deleteButton);
+        imgDiv.append(checkbox);
+        imgDiv.append(newImg);
+        panel.append(imgDiv);
+
+        if(imageList.length === 0)
+            window.parent.postMessage("Enable createButton", "*");
+
+        imageList.push(newImg);
+
+        openSection(currentSection);
+    }
+
+    <!--region CreatePDF-->
+    var curPage, pdfPages = [], imageData = [], pageWidth, pageHeight;
+    var Offset = {
+        _offset : 0,
+        get : function( value ){
+            Offset.set(this._offset + value);
+            return this._offset; },
+        set : function( value ){
+            this._offset = value;
+        },
+    };
+
+    function createPDF() {
+
+        Offset.set(0);
+
+        let doc = new jsPDF();
+
+        doc.addHTML(document.body, {pagesplit: true, 'margin':{top: 10, right: 10, bottom: 10, left: 10}}, function(){
+            doc.deletePage(1);
+
+            pageWidth = doc.internal.pageSize.getWidth();
+            pageHeight = doc.internal.pageSize.getHeight();
+
+            doc.setFont("times", "normal");
+            doc.setFontSize(10);
+            doc.text("FORM ID: RB" + formNum, Offset.get(3), 5);
+
+            let logoImage = new Image();
+            logoImage.src = 'https://i.imgur.com/XjpXYwB.jpg';
+            doc.addImage(logoImage, 'jpg', pageWidth - 60, Offset.get(0), 60, 6);
+
+            doc.setFontSize(15);
+            doc.setLineWidth(.7);
+            doc.setFontStyle('bold');
+            doc.text("Buyer's Repair Request Addendum", pageWidth/2, Offset.get(20), 'center');
+            doc.line(pageWidth/2 - 40, Offset.get(2), pageWidth/2 + 40, Offset.get(0));
+
+            doc.setFontStyle('italic');
+            doc.setFontSize(12);
+            doc.text("Prepared Exclusively For: " + formName, pageWidth/2, Offset.get(8), 'center');
+            doc.text("Test line " + formAddress, pageWidth/2, Offset.get(5), 'center');
+            doc.text("Test line " +formDate, pageWidth/2, Offset.get(5), 'center');
+
+            //createSections();
+
+            doc.output('dataurlnewwindow');
+        });
+    }
+
+    function createSections() {
+
+        for(let i = 0; i < sections.length; i++)
+        {
+            Offset.set(30);
+
+            if(i === 0)
+            {
+                doc.setFontSize(15);
+                doc.setLineWidth(.7);
+                doc.setFontStyle('bold');
+                doc.text("Buyer's Repair Request Addendum", pageWidth/2, Offset.get(20), 'center');
+                doc.line(pageWidth/2 - 40, Offset.get(2), pageWidth/2 + 40, Offset.get(0));
+
+                doc.setFontStyle('italic');
+                doc.setFontSize(12);
+                doc.text("Prepared Exclusively For: " + formName, pageWidth/2, Offset.get(8), 'center');
+                doc.text("Test line " + formAddress, pageWidth/2, Offset.get(5), 'center');
+                doc.text("Test line " +formDate, pageWidth/2, Offset.get(5), 'center');
+                doc.setLineWidth(1);
+            }
+
+            doc.setFontStyle('bold');
+            doc.setFontSize(13);
+            doc.text("ITEM #" + (i + 1), pageWidth / 2, Offset.get(7), 'center');
+
+            doc.setLineWidth(.7);
+            doc.line(pageWidth/2 - 10, Offset.get(2), pageWidth/2+10, Offset.get(0));
+
+            doc.setLineWidth(1);
+            doc.line(15, Offset.get(3), pageWidth - 15, Offset.get(0));
+
+            doc.setFontSize(13);
+            doc.text("INSPECTION REPORT REFERENCE", pageWidth / 2, Offset.get(7), 'center');
+            doc.setLineWidth(.7);
+            doc.line(pageWidth/2 - 40, Offset.get(2), pageWidth/2 + 40, Offset.get(0));
+
+            doc.setFontSize(8);
+
+            let imageDivs = sections[i].children[1].children;
+
+            for(let j = 0; j < imageDivs.length; j++) {
+                let curImage = imageDivs[j].children[2];
+                let ratio = curImage.width/(pageWidth - 60);
+                doc.rect(28, Offset.get(0) + 8, curImage.width/ratio+4, curImage.height/ratio+4);
+                doc.addImage(curImage, 'jpg', 30, Offset.get(10), curImage.width / ratio, curImage.height / ratio);
+                Offset.set(curImage.height/ratio);
+            }
+
+            doc.line(15, Offset.get(10), pageWidth - 15, Offset.get(0));
+
+            doc.setFontSize(11);
+            doc.setFontStyle('bold');
+            doc.text("BUYER'S REPAIR REQUEST", pageWidth / 2, Offset.get(6), 'center');
+            doc.setLineWidth(.6);
+            doc.line(pageWidth/2 - 25, Offset.get(2), pageWidth/2 + 25, Offset.get(0));
+
+            doc.setFontSize(9);
+            doc.setFontStyle('italic');
+            doc.text("Check all that apply (at least one)", pageWidth / 2, Offset.get(4), 'center');
+
+            let checkBox = new CheckBox();
+            checkBox.Rect = [20, Offset.get(6) - 4, 6, 6];
+            doc.rect(20, Offset.get(0)-4, 6, 6);
+            checkBox.caption = '8';
+            checkBox.defaultValue = "Off";
+            checkBox.appearanceState = "Off";
+            doc.addField(checkBox);
+            doc.setFontStyle('normal');
+            doc.setFontSize(10);
+            doc.text("Correct the Item(s) Referenced Below", 28, Offset.get(0));
+
+            checkBox = new CheckBox();
+            checkBox.Rect = [90, Offset.get(0) - 4, 6, 6];
+            doc.rect(90, Offset.get(0)-4, 6, 6);
+            checkBox.caption = '8';
+            checkBox.defaultValue = "Off";
+            checkBox.appearanceState = "Off";
+            doc.addField(checkBox);
+            doc.text("Licensed Contractor Required", 100, Offset.get(0));
+
+            checkBox = new CheckBox();
+            checkBox.Rect = [150, Offset.get(0) - 4, 6, 6];
+            doc.rect(150, Offset.get(0)-4, 6, 6);
+            checkBox.caption = '8';
+            checkBox.defaultValue = "Off";
+            checkBox.appearanceState = "Off";
+            doc.addField(checkBox);
+            doc.text("See Comments", 158, Offset.get(0));
+
+            doc.setFontSize(9);
+            doc.setFontStyle('italic');
+            doc.text("Comments: ", 20, Offset.get(9));
+
+            let textField = new TextField();
+            textField.Rect = [38, Offset.get(0) - 3, pageWidth - 55, 19];
+            textField.fontSize = 8;
+            textField.multiline = true;
+            textField.value = "";
+            doc.addField(textField);
+
+            doc.line(15, Offset.get(18), pageWidth - 15, Offset.get(0));
+
+            doc.setFontSize(11);
+            doc.setFontStyle('bold');
+            doc.text("BUYER'S REQUEST IN LIEU OF REPAIRS", pageWidth / 2, Offset.get(6), 'center');
+            doc.setLineWidth(.6);
+            doc.line(pageWidth/2 - 40, Offset.get(2), pageWidth/2 + 40, Offset.get(0));
+
+            doc.setFontSize(9);
+            doc.setFontStyle('italic');
+            doc.text("Check all that apply (at least one)", pageWidth / 2, Offset.get(4), 'center');
+
+            checkBox = new CheckBox();
+            checkBox.Rect = [50, Offset.get(6) - 4, 6, 6];
+            doc.rect(50, Offset.get(0)-4, 6, 6);
+            checkBox.caption = '8';
+            checkBox.defaultValue = "Off";
+            checkBox.appearanceState = "Off";
+            doc.addField(checkBox);
+            doc.setFontStyle('normal');
+            doc.setFontSize(10);
+            doc.text("Credit $______", 58, Offset.get(0));
+
+            checkBox = new CheckBox();
+            checkBox.Rect = [90, Offset.get(0) - 4, 6, 6];
+            doc.rect(90, Offset.get(0)-4, 6, 6);
+            checkBox.caption = '8';
+            checkBox.defaultValue = "Off";
+            checkBox.appearanceState = "Off";
+            doc.addField(checkBox);
+            doc.text("See Comments", 100, Offset.get(0));
+
+            checkBox = new CheckBox();
+            checkBox.Rect = [130, Offset.get(0) - 4, 6, 6];
+            doc.rect(130, Offset.get(0)-4, 6, 6);
+            checkBox.caption = '8';
+            checkBox.defaultValue = "Off";
+            checkBox.appearanceState = "Off";
+            doc.addField(checkBox);
+            doc.text("N/A", 138, Offset.get(0));
+
+            doc.setFontSize(9);
+            doc.setFontStyle('italic');
+            doc.text("Comments: ", 20, Offset.get(9));
+
+            textField = new TextField();
+            textField.Rect = [38, Offset.get(0) - 3, pageWidth - 55, 19];
+            textField.fontSize = 8;
+            textField.multiline = true;
+            textField.value = "";
+            doc.addField(textField);
+
+            doc.setLineWidth(2);
+        }
+
+        pdfPages.output('dataurl');
+
+        let pageOutput = "Lightbox";
+        for(let j = 0; j < pdfPages.length; j++)
+            pageOutput = pageOutput + " " + pdfPages[j].output('dataurlstring');
+
+        window.parent.postMessage(pageOutput, "*");
+    }
+
+    function createBottom() {
+
+        doc.rect(15, Offset.get(15), pageWidth-30, 50);
+
+        doc.setFontStyle('bold');
+        doc.setFontSize(12);
+        doc.setLineWidth(1);
+
+        doc.text("BUYER'S REQUEST IN LIEU OF ALL REPAIRS", pageWidth / 2, Offset.get(5.5), 'center');
+
+        doc.setFontSize(9);
+        doc.setFontStyle('italic');
+        doc.text("Check all that apply (at least one)", pageWidth / 2, Offset.get(4), 'center');
+
+        let checkBox = new CheckBox();
+        checkBox.Rect = [50, Offset.get(6) - 4, 6, 6];
+        doc.rect(50, Offset.get(0)-4, 6, 6);
+        checkBox.caption = '8';
+        checkBox.defaultValue = "Off";
+        checkBox.appearanceState = "Off";
+        doc.addField(checkBox);
+        doc.setFontStyle('normal');
+        doc.setFontSize(10);
+        doc.text("Credit $______", 58, Offset.get(0));
+
+        checkBox = new CheckBox();
+        checkBox.Rect = [90, Offset.get(0) - 4, 6, 6];
+        doc.rect(90, Offset.get(0)-4, 6, 6);
+        checkBox.caption = '8';
+        checkBox.defaultValue = "Off";
+        checkBox.appearanceState = "Off";
+        doc.addField(checkBox);
+        doc.text("See Comments", 100, Offset.get(0));
+
+        checkBox = new CheckBox();
+        checkBox.Rect = [130, Offset.get(0) - 4, 6, 6];
+        doc.rect(130, Offset.get(0)-4, 6, 6);
+        checkBox.caption = '8';
+        checkBox.defaultValue = "Off";
+        checkBox.appearanceState = "Off";
+        doc.addField(checkBox);
+        doc.text("N/A", 138, Offset.get(0));
+
+        doc.setFontSize(9);
+        doc.setFontStyle('italic');
+        doc.text("Comments: ", 20, Offset.get(9));
+
+        let textField = new TextField();
+        textField.Rect = [38, Offset.get(0) - 3, pageWidth - 55, 19];
+        textField.fontSize = 8;
+        textField.multiline = true;
+        textField.value = "";
+        doc.addField(textField);
+
+        let logoImage = new Image();
+        logoImage.src = 'https://i.imgur.com/bTKDc7t.jpg';
+        doc.addImage(logoImage, 'jpg', pageWidth/2 - 65, Offset.get(40), 130, 15);
+
+        doc.setFontStyle('italic');
+        doc.text("requestbuilder.com", pageWidth / 2, Offset.get(20), 'center');
+    }
+
+</script>
+</body></html>
